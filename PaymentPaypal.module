@@ -1,0 +1,148 @@
+<?php
+
+require_once(dirname(__FILE__) . '/PaymentAbstract.php');
+
+class PaymentPaypal extends PaymentAbstract implements ConfigurableModule {
+	
+    public static function getModuleInfo()
+	{
+		return array(
+			'title' => 'Paypal Payment Method',
+			'version' => 001,
+			'summary' => 'Paypal payment method for ProcessWire Shop',
+			'singular' => false,
+			'autoload' => false
+		);
+	}
+    public function init() {
+		$this->title = __("Paypal (also credit card)");
+	}
+	
+	/*
+	 *
+	 * returns nothing. You should edit and save $order page. If payment was succesful,
+	 * then do $order->removeStatus(Page::statusUnpublished) and remember to save the order!
+	 *
+	 * If order was also paid, then do $order->sc_paid = time();
+	 *
+	 * If order was not paid, but it was succesful (like invoice, money on delivery etc)
+	 * then just publish the order, but do not set sc_paid value.
+	 *
+	 * After you have manipulated the order, then just to redirect to $this->completedUrl
+	 *
+	 *
+	 * @param Page $order keeps the page object for the order
+	 *
+	 */
+    public function processPayment(Page $order) {
+
+    	$out = '';
+
+    	if ($this->input->urlSegment(2) == "return") {
+            $verify_url = 'https://www.paypal.com/cgi-bin/webscr?cmd=_notify-validate&' . http_build_query( $_POST );   
+
+			if( !strstr( file_get_contents( $verify_url ), 'VERIFIED' ) ) {
+				$out .= 'error when validating your payment.';
+			} else {
+				$order->setOutputFormatting(false);
+	            $order->sc_paid = time();
+	            $order->sc_paymentid = $this->sanitizer->text($_POST['txn_id']);
+	            $order->removeStatus(Page::statusUnpublished);
+	            $order->save();
+	            $this->session->redirect($this->completedUrl);
+			}
+        }
+
+		else if ($this->input->urlSegment(2) == "cancel") {
+            $this->session->redirect($this->completedUrl);
+        } else {
+			// Let's generate the form code for Paypal data
+			$http = ($this->config->https) ? 'https://' : 'http://';
+			$returnUrl =  $http . $this->config->httpHost . $this->currentUrl . "return/";
+			$cancelUrl =  $http . $this->config->httpHost . $this->currentUrl . "cancel/";
+			
+			$out .= '<form id = "paypal_checkout" action = "https://www.paypal.com/cgi-bin/webscr" method = "post">';
+
+			$out .= '<input name = "cmd" value = "_cart" type = "hidden">
+	    	<input name = "upload" value = "1" type = "hidden">
+	    	<input name = "no_note" value = "0" type = "hidden">
+	    	<input name = "bn" value = "PP-BuyNowBF" type = "hidden">
+	    	<input name = "tax" value = "0" type = "hidden">
+	    	<input name = "rm" value = "2" type = "hidden">';
+
+	    	$out .= '<input type="hidden" name="first_name" value="'. $order->sc_firstname .'">
+			<input type="hidden" name="last_name" value="'. $order->sc_lastname .'">
+			<input type="hidden" name="address1" value="'. $order->sc_streetaddress .'">
+			<input type="hidden" name="city" value="'. $order->sc_city .'">
+			<input type="hidden" name="zip" value="'. $order->sc_zip .'">
+			<input type="hidden" name="email" value="'. $order->email .'">';
+
+		    $out .= '<input name = "business" value = "' . $this->business .'" type = "hidden">
+		    <input name = "handling_cart" value = "0" type = "hidden">
+		    <input name = "currency_code" value = "'. $this->currency .'" type = "hidden">
+		    <input name = "lc" value = "'. $this->location .'" type = "hidden">
+		    <input name = "return" value = "'. $returnUrl .'" type = "hidden">
+		    <input name = "cbt" value = "'. $this->returntxt .'" type = "hidden">
+		    <input name = "cancel_return" value = "'. $cancelUrl .'" type = "hidden">
+		    <input name = "custom" value = "" type = "hidden">';
+
+		    foreach($order->children('check_access=0') as $i => $p) {
+
+		    	$i = $i + 1;
+
+		    	$out .= '<input name = "item_name_'. $i .'" value = "'. $p->title .'" type = "hidden">';
+		    	$out .= '<input name = "quantity_'. $i .'" value = "'. $p->sc_qty .'" type = "hidden">';
+		    	$out .= '<input name = "amount_'. $i .'" value = "'. $p->sc_price .'" type = "hidden">';
+		    	$out .= '<input name = "shipping_'. $i .'" value = "0" type = "hidden">';
+			}
+
+			$out .= '<input id = "ppcheckoutbtn" value = "'. __("Click here to proceed to Paypal.com") .'" class = "button" type = "submit">';
+
+			$out .= '</form>';
+
+			$out .= "<script>document.forms['paypal_checkout'].submit();</script>";
+        }
+
+		return $out;
+    }
+
+    static public function getModuleConfigInputfields(Array $data) {
+                // this is a container for fields, basically like a fieldset
+                $fields = new InputfieldWrapper();
+
+                // since this is a static function, we can't use $this->modules, so get them from the global wire() function
+                $modules = wire('modules');
+
+
+                if(empty($data['currency'])) $data['currency'] = 'EUR';
+                if(empty($data['merchantSecret'])) $data['merchantSecret'] = '6pKF4jkv97zmqBJ3ZL8gUw5DfT2NMQ';
+
+                $field = $modules->get("InputfieldText");
+                $field->attr('name', 'business');
+                $field->attr('value', $data['business']);
+                $field->label = "Paypal email";
+                $fields->add($field);
+
+                $field = $modules->get("InputfieldText");
+                $field->attr('name', 'currency');
+                $field->attr('value', $data['currency']);
+                $field->label = "Currency used (Paypal currency code)";
+                $fields->add($field);
+
+                $field = $modules->get("InputfieldText");
+                $field->attr('name', 'location');
+                $field->attr('value', $data['location']);
+                $field->label = "Location";
+                $field->description = "Location code, ie. GB";
+                $fields->add($field);
+
+                $field = $modules->get("InputfieldText");
+                $field->attr('name', 'returntxt');
+                $field->attr('value', $data['returntxt']);
+                $field->label = "Text on 'back to mysite.com' button at Paypal.com";
+                $fields->add($field);
+
+
+                return $fields;
+        }
+}
