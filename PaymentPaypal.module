@@ -68,7 +68,8 @@ class PaymentPaypal extends PaymentAbstract implements ConfigurableModule {
 	    	<input name = "no_note" value = "0" type = "hidden">
 	    	<input name = "bn" value = "PP-BuyNowBF" type = "hidden">
 	    	<input name = "tax" value = "0" type = "hidden">
-	    	<input name = "rm" value = "2" type = "hidden">';
+	    	<input name = "rm" value = "2" type = "hidden">
+	    	<input name = "charset" value = "utf-8" type = "hidden">';
 
 	    	$out .= '<input type="hidden" name="first_name" value="'. $order->sc_firstname .'">
 			<input type="hidden" name="last_name" value="'. $order->sc_lastname .'">
